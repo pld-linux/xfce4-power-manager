@@ -1,12 +1,13 @@
 Summary:	Power manager for the Xfce desktop environment
 Summary(pl.UTF-8):	Zarządca energii dla środowiska Xfce
 Name:		xfce4-power-manager
-Version:	0.6.4
+Version:	0.8.5
 Release:	1
 License:	GPL v2
 Group:		X11/Applications
-Source0:	http://goodies.xfce.org/releases/xfce4-power-manager/%{name}-%{version}.tar.bz2
-# Source0-md5:	8f5e27d75a5c9484a835c4eddcb80030
+Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/0.8/%{name}-%{version}.tar.bz2
+# Source0-md5:	ca6a1fff1d4fee86844c2f5621e9fb87
+Patch0:		%{name}-link.patch
 URL:		http://goodies.xfce.org/projects/applications/xfce4-power-manager
 BuildRequires:	autoconf >= 2.50
 BuildRequires:	automake >= 1:1.8
@@ -17,11 +18,13 @@ BuildRequires:	gtk+2-devel >= 2:2.10.6
 BuildRequires:	hal-devel >= 0.5.6
 BuildRequires:	intltool
 BuildRequires:	libnotify-devel
+BuildRequires:	libtool
 BuildRequires:	libxfcegui4-devel >= 4.6.0
 BuildRequires:	rpmbuild(macros) >= 1.311
 BuildRequires:	xfce4-dev-tools >= 4.6.0
 BuildRequires:	xfconf-devel >= 4.6.0
 Requires(post,postun):	gtk+2
+Requires:	xfce4-dirs >= 4.6
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
@@ -32,14 +35,17 @@ Zarządca energii dla środowiska Xfce.
 
 %prep
 %setup -q
+%patch0 -p1
 
 %build
 %{__intltoolize}
+%{__libtoolize}
 %{__aclocal}
 %{__autoconf}
 %{__autoheader}
 %{__automake}
 %configure
+
 %{__make}
 
 %install
@@ -47,8 +53,6 @@ rm -rf $RPM_BUILD_ROOT
 
 %{__make} install \
 	DESTDIR=$RPM_BUILD_ROOT
-
-mv $RPM_BUILD_ROOT%{_datadir}/locale/pt{_PT,}
 
 %find_lang %{name}
 
@@ -64,8 +68,13 @@ rm -rf $RPM_BUILD_ROOT
 %files -f %{name}.lang
 %defattr(644,root,root,755)
 %doc AUTHORS ChangeLog NEWS README TODO
+%{_sysconfdir}/xdg/autostart/xfce4-power-manager.desktop
 %attr(755,root,root) %{_bindir}/xfce4-power-manager
 %attr(755,root,root) %{_bindir}/xfce4-power-manager-settings
-%{_desktopdir}/xfce4-power-manager.desktop
+%attr(755,root,root) %{_libdir}/xfce4/panel-plugins/xfce4-brightness-plugin
+%{_desktopdir}/xfce4-power-manager-settings.desktop
+%{_datadir}/xfce4/panel-plugins/xfce4-brightness-plugin.desktop
 %{_iconsdir}/hicolor/*/*/*
-%{_datadir}/xfce4/doc/C/*
+%{_datadir}/xfce4/doc/C/*.html
+%{_datadir}/xfce4/doc/C/images/*.png
+%{_mandir}/man1/xfce4-power-manager*.1*
