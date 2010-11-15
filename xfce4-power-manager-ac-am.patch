@@ -1,0 +1,26 @@
+--- xfce4-power-manager-1.0.1/configure.ac~	2010-08-30 11:12:51.000000000 +0200
++++ xfce4-power-manager-1.0.1/configure.ac	2010-11-15 12:49:12.321126909 +0100
+@@ -249,7 +249,7 @@
+ 	======================================
+  
+ 	prefix:			${prefix}
+-	xdg autostart:		${sysconfdir/xdg/autostart}
++	xdg autostart:		${sysconfdir}/xdg/autostart
+ 	HAL:			${enable_hal}
+ 	POLKIT:			${polkit}
+    	DPMS:   		${have_dpms}
+--- xfce4-power-manager-1.0.1/src/Makefile.am~	2010-05-19 11:22:38.000000000 +0200
++++ xfce4-power-manager-1.0.1/src/Makefile.am	2010-11-15 12:50:11.801127654 +0100
+@@ -85,10 +85,10 @@
+ 	$(LIBXFCE4UI_CFLAGS)
+ 
+ xfce4_power_information_LDADD =			\
++	$(top_builddir)/libdbus/libxfpmdbus.la	\
+ 	$(GOBJECT_LIBS)                         \
+ 	$(DBUS_GLIB_LIBS)                       \
+-	$(LIBXFCE4UI_LIBS)			\
+-	$(top_builddir)/libdbus/libxfpmdbus.la
++	$(LIBXFCE4UI_LIBS)
+ 
+ manpagedir = $(mandir)/man1
+ 
