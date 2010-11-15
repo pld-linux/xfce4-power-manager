@@ -9,6 +9,7 @@ Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/1.0/%{name}-%{vers
 # Source0-md5:	683558affa77beefb14855c110c6bd28
 Patch0:		%{name}-ac-am.patch
 URL:		http://goodies.xfce.org/projects/applications/xfce4-power-manager
+BuildRequires:	UPower-devel
 BuildRequires:	autoconf >= 2.50
 BuildRequires:	automake >= 1:1.8
 BuildRequires:	dbus-glib-devel >= 0.74
@@ -23,6 +24,7 @@ BuildRequires:	rpmbuild(macros) >= 1.311
 BuildRequires:	xfce4-dev-tools >= 4.7.0
 BuildRequires:	xfconf-devel >= 4.7.0
 Requires(post,postun):	gtk+2
+Requires:	UPower
 Requires:	xfce4-dirs >= 4.6
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
