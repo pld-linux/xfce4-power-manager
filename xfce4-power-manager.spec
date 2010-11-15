@@ -1,28 +1,22 @@
 Summary:	Power manager for the Xfce desktop environment
 Summary(pl.UTF-8):	Zarządca energii dla środowiska Xfce
 Name:		xfce4-power-manager
-Version:	0.8.5
-Release:	2
+Version:	1.0.1
+Release:	0.1
 License:	GPL v2
 Group:		X11/Applications
-Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/0.8/%{name}-%{version}.tar.bz2
-# Source0-md5:	ca6a1fff1d4fee86844c2f5621e9fb87
-Patch0:		%{name}-link.patch
+Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/1.0/%{name}-%{version}.tar.bz2
+# Source0-md5:	683558affa77beefb14855c110c6bd28
 URL:		http://goodies.xfce.org/projects/applications/xfce4-power-manager
-BuildRequires:	autoconf >= 2.50
-BuildRequires:	automake >= 1:1.8
 BuildRequires:	dbus-glib-devel >= 0.74
 BuildRequires:	gettext-devel
 BuildRequires:	glib2-devel >= 1:2.14.0
 BuildRequires:	gtk+2-devel >= 2:2.10.6
-BuildRequires:	hal-devel >= 0.5.6
-BuildRequires:	intltool
 BuildRequires:	libnotify-devel
-BuildRequires:	libtool
-BuildRequires:	libxfcegui4-devel >= 4.6.0
+BuildRequires:	libxfce4ui-devel >= 4.7.0
 BuildRequires:	rpmbuild(macros) >= 1.311
-BuildRequires:	xfce4-dev-tools >= 4.6.0
-BuildRequires:	xfconf-devel >= 4.6.0
+BuildRequires:	xfce4-dev-tools >= 4.7.0
+BuildRequires:	xfconf-devel >= 4.7.0
 Requires(post,postun):	gtk+2
 Requires:	xfce4-dirs >= 4.6
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
@@ -35,16 +29,10 @@ Zarządca energii dla środowiska Xfce.
 
 %prep
 %setup -q
-%patch0 -p1
 
 %build
-%{__intltoolize}
-%{__libtoolize}
-%{__aclocal}
-%{__autoconf}
-%{__autoheader}
-%{__automake}
-%configure
+%configure \
+	--disable-hal
 
 %{__make}
 
