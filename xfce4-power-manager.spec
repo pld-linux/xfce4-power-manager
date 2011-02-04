@@ -2,7 +2,7 @@ Summary:	Power manager for the Xfce desktop environment
 Summary(pl.UTF-8):	Zarządca energii dla środowiska Xfce
 Name:		xfce4-power-manager
 Version:	0.8.5
-Release:	2
+Release:	3
 License:	GPL v2
 Group:		X11/Applications
 Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/0.8/%{name}-%{version}.tar.bz2
@@ -23,7 +23,8 @@ BuildRequires:	libxfcegui4-devel >= 4.6.0
 BuildRequires:	rpmbuild(macros) >= 1.311
 BuildRequires:	xfce4-dev-tools >= 4.6.0
 BuildRequires:	xfconf-devel >= 4.6.0
-Requires(post,postun):	gtk+2
+Requires(post,postun):	gtk-update-icon-cache
+Requires(post,postun):	hicolor-icon-theme
 Requires:	xfce4-dirs >= 4.6
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
