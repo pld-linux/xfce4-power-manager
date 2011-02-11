@@ -1,18 +1,20 @@
---- xfce4-power-manager-1.0.1/configure.ac~	2010-08-30 11:12:51.000000000 +0200
-+++ xfce4-power-manager-1.0.1/configure.ac	2010-11-15 12:49:12.321126909 +0100
-@@ -249,7 +249,7 @@
+diff -urN xfce4-power-manager-1.0.3/configure.ac xfce4-power-manager-1.0.3.new//configure.ac
+--- xfce4-power-manager-1.0.3/configure.ac	2011-01-04 13:37:58.000000000 +0000
++++ xfce4-power-manager-1.0.3.new//configure.ac	2011-02-11 19:45:25.683334784 +0000
+@@ -251,7 +251,7 @@
  	======================================
   
  	prefix:			${prefix}
 -	xdg autostart:		${sysconfdir/xdg/autostart}
 +	xdg autostart:		${sysconfdir}/xdg/autostart
- 	HAL:			${enable_hal}
  	POLKIT:			${polkit}
     	DPMS:   		${have_dpms}
---- xfce4-power-manager-1.0.1/src/Makefile.am~	2010-05-19 11:22:38.000000000 +0200
-+++ xfce4-power-manager-1.0.1/src/Makefile.am	2010-11-15 12:50:11.801127654 +0100
-@@ -85,10 +85,10 @@
- 	$(LIBXFCE4UI_CFLAGS)
+ 	Network manager:	${ac_network_manager}
+diff -urN xfce4-power-manager-1.0.3/src/Makefile.am xfce4-power-manager-1.0.3.new//src/Makefile.am
+--- xfce4-power-manager-1.0.3/src/Makefile.am	2011-01-04 12:22:56.000000000 +0000
++++ xfce4-power-manager-1.0.3.new//src/Makefile.am	2011-02-11 19:45:51.306668083 +0000
+@@ -97,10 +97,11 @@
+ 	$(PLATFORM_LDFLAGS)
  
  xfce4_power_information_LDADD =			\
 +	$(top_builddir)/libdbus/libxfpmdbus.la	\
@@ -21,6 +23,7 @@
 -	$(LIBXFCE4UI_LIBS)			\
 -	$(top_builddir)/libdbus/libxfpmdbus.la
 +	$(LIBXFCE4UI_LIBS)
++
  
- manpagedir = $(mandir)/man1
+ if ENABLE_POLKIT
  
