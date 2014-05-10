@@ -1,0 +1,56 @@
+From cc57e74499209ca28b4bc0b2d12c6569e254c449 Mon Sep 17 00:00:00 2001
+From: Stefan Seyfried <seife+dev@b1-systems.com>
+Date: Sun, 13 Apr 2014 18:17:29 +0200
+Subject: [PATCH 177/219] xfpm_backlight_button_pressed_cb: fix popup display
+
+With /xfce4-power-manager/change-brightness-on-key-events=false, the
+level variable is used uninitialized and the popup's level gauge is
+wrong. Slight Code reformatting included, to avoid duplicating most
+of the code.  (Rebased version of a patch I wrote a year ago)
+
+Signed-off-by: Eric Koegel <eric.koegel@gmail.com>
+---
+ src/xfpm-backlight.c | 23 +++++++++++------------
+ 1 file changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/src/xfpm-backlight.c b/src/xfpm-backlight.c
+index 45c990f..a13ab84 100644
+--- a/src/xfpm-backlight.c
++++ b/src/xfpm-backlight.c
+@@ -202,22 +202,21 @@ xfpm_backlight_button_pressed_cb (XfpmButton *button, XfpmButtonKey type, XfpmBa
+ 		  SHOW_BRIGHTNESS_POPUP, &show_popup,
+                   NULL);
+     
+-    if ( type == BUTTON_MON_BRIGHTNESS_UP )
++    if ( type != BUTTON_MON_BRIGHTNESS_UP && type != BUTTON_MON_BRIGHTNESS_DOWN )
++	return; /* sanity check, can this ever happen? */
++
++    backlight->priv->block = TRUE;
++    if ( !enable_brightness )
++	ret = xfpm_brightness_get_level (backlight->priv->brightness, &level);
++    else
+     {
+-	backlight->priv->block = TRUE;
+-	if ( enable_brightness )
++	if ( type == BUTTON_MON_BRIGHTNESS_UP )
+ 	    ret = xfpm_brightness_up (backlight->priv->brightness, &level);
+-	if ( ret && show_popup)
+-	    xfpm_backlight_show (backlight, level);
+-    }
+-    else if ( type == BUTTON_MON_BRIGHTNESS_DOWN )
+-    {
+-	backlight->priv->block = TRUE;
+-	if ( enable_brightness )
++	else
+ 	    ret = xfpm_brightness_down (backlight->priv->brightness, &level);
+-	if ( ret && show_popup)
+-	    xfpm_backlight_show (backlight, level);
+     }
++    if ( ret && show_popup)
++	xfpm_backlight_show (backlight, level);
+ }
+ 
+ static void
+-- 
+1.9.3
+

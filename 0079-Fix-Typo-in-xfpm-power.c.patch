@@ -1,0 +1,25 @@
+From b35cee55e065a7ebcbe6062cdcc5916cbe04973f Mon Sep 17 00:00:00 2001
+From: Benjamin Kerensa <bkerensa@ubuntu.com>
+Date: Sun, 10 Mar 2013 19:36:13 -0700
+Subject: [PATCH 079/219] Fix Typo in xfpm-power.c
+
+---
+ src/xfpm-power.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/xfpm-power.c b/src/xfpm-power.c
+index 796bef8..bcf2fbd 100644
+--- a/src/xfpm-power.c
++++ b/src/xfpm-power.c
+@@ -1034,7 +1034,7 @@ xfpm_power_add_device (XfpmPower *power, const gchar *object_path)
+     }
+     else if ( device_type != XFPM_DEVICE_TYPE_LINE_POWER )
+     {
+-	g_warning ("Unable to monitor unkown power device with object_path : %s", object_path);
++	g_warning ("Unable to monitor unknown power device with object_path : %s", object_path);
+ 	g_object_unref (proxy_prop);
+     }
+ }
+-- 
+1.9.3
+

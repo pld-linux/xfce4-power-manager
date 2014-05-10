@@ -1,0 +1,544 @@
+From 1d33e3eb8b9fd684c3a0fb6eaaa44b9ca0d13604 Mon Sep 17 00:00:00 2001
+From: Sonal Santan <sonal.santan@gmail.com>
+Date: Mon, 20 Jan 2014 10:01:47 +0300
+Subject: [PATCH 150/219] Add support for keyboard backlight control (Bug
+ 10470)
+
+I have enhanced xfce4-power-manager to support backlit keyboard brightness
+control through keyboard brightness keys. It uses
+org.freedesktop.UPower.KbdBacklight interface for increasing or decreasing
+the keyboard backlight brightness and binds with keys
+XF86XK_KbdBrightnessUp and XF86XK_KbdBrightnessDown.
+
+This feature is useful when the firmware does not handle the keyboard
+brightness control automatically. For example MacBook Pro leaves it to the
+OS to control the keyboard brightness through special keys. With this
+change, I can light up the keyboard on MacBook Pro and control its
+brightness through the special keys.
+
+I have also tested this on Lenovo X1 Carbon where the keyboard brightness
+is automatically handled by the firmware and this enhancement steps aside
+without interfering.
+---
+ src/Makefile.am          |   2 +
+ src/xfpm-button.c        |   8 +-
+ src/xfpm-enum-glib.h     |   2 +
+ src/xfpm-enum.h          |  16 +--
+ src/xfpm-kbd-backlight.c | 276 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/xfpm-kbd-backlight.h |  55 ++++++++++
+ src/xfpm-manager.c       |  45 ++++----
+ 7 files changed, 378 insertions(+), 26 deletions(-)
+ create mode 100644 src/xfpm-kbd-backlight.c
+ create mode 100644 src/xfpm-kbd-backlight.h
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index e6e8ed3..316a823 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -26,6 +26,8 @@ xfce4_power_manager_SOURCES =                   \
+ 	egg-idletime.h				\
+ 	xfpm-backlight.c			\
+ 	xfpm-backlight.h			\
++	xfpm-kbd-backlight.c			\
++	xfpm-kbd-backlight.h			\
+ 	xfpm-dpms.c				\
+ 	xfpm-dpms.h				\
+ 	xfpm-button.c				\
+diff --git a/src/xfpm-button.c b/src/xfpm-button.c
+index 70c07a1..accf76d 100644
+--- a/src/xfpm-button.c
++++ b/src/xfpm-button.c
+@@ -208,12 +208,18 @@ xfpm_button_setup (XfpmButton *button)
+ 	
+     if ( xfpm_button_xevent_key (button, XF86XK_MonBrightnessUp, BUTTON_MON_BRIGHTNESS_UP) )
+ 	button->priv->mapped_buttons |= BRIGHTNESS_KEY_UP;
+-	
++
+     if (xfpm_button_xevent_key (button, XF86XK_MonBrightnessDown, BUTTON_MON_BRIGHTNESS_DOWN) )
+ 	button->priv->mapped_buttons |= BRIGHTNESS_KEY_DOWN;
+ 	
+     xfpm_button_xevent_key (button, XF86XK_Battery, BUTTON_BATTERY);
+ 
++    if ( xfpm_button_xevent_key (button, XF86XK_KbdBrightnessUp, BUTTON_KBD_BRIGHTNESS_UP) )
++	button->priv->mapped_buttons |= KBD_BRIGHTNESS_KEY_UP;
++
++    if (xfpm_button_xevent_key (button, XF86XK_KbdBrightnessDown, BUTTON_KBD_BRIGHTNESS_DOWN) )
++	button->priv->mapped_buttons |= KBD_BRIGHTNESS_KEY_DOWN;
++
+     gdk_window_add_filter (button->priv->window, 
+ 			   xfpm_button_filter_x_events, button);
+ }
+diff --git a/src/xfpm-enum-glib.h b/src/xfpm-enum-glib.h
+index b047eb4..5bb70fa 100644
+--- a/src/xfpm-enum-glib.h
++++ b/src/xfpm-enum-glib.h
+@@ -94,6 +94,8 @@ typedef enum
+     BUTTON_MON_BRIGHTNESS_DOWN,
+     BUTTON_LID_CLOSED,
+     BUTTON_BATTERY,
++    BUTTON_KBD_BRIGHTNESS_UP,
++    BUTTON_KBD_BRIGHTNESS_DOWN,
+     NUMBER_OF_BUTTONS
+     
+ } XfpmButtonKey;
+diff --git a/src/xfpm-enum.h b/src/xfpm-enum.h
+index 5a9f630..e254218 100644
+--- a/src/xfpm-enum.h
++++ b/src/xfpm-enum.h
+@@ -40,13 +40,15 @@ typedef enum
+ 
+ typedef enum
+ {
+-    LID_KEY   		= (1 << 0),
+-    BRIGHTNESS_KEY_UP	= (1 << 1),
+-    BRIGHTNESS_KEY_DOWN	= (1 << 2),
+-    SLEEP_KEY 		= (1 << 3),
+-    HIBERNATE_KEY	= (1 << 4),
+-    POWER_KEY 		= (1 << 5)
+-    
++    LID_KEY   	        	= (1 << 0),
++    BRIGHTNESS_KEY_UP   	= (1 << 1),
++    BRIGHTNESS_KEY_DOWN  	= (1 << 2),
++    SLEEP_KEY 	        	= (1 << 3),
++    HIBERNATE_KEY	        = (1 << 4),
++    POWER_KEY 	        	= (1 << 5),
++    KBD_BRIGHTNESS_KEY_UP	= (1 << 6),
++    KBD_BRIGHTNESS_KEY_DOWN	= (1 << 7)
++
+ } XfpmKeys;
+ 
+ typedef enum
+diff --git a/src/xfpm-kbd-backlight.c b/src/xfpm-kbd-backlight.c
+new file mode 100644
+index 0000000..c45283d
+--- /dev/null
++++ b/src/xfpm-kbd-backlight.c
+@@ -0,0 +1,276 @@
++/*
++ * * Copyright (C) 2013 Sonal Santan <sonal.santan@gmail.com>
++ *
++ * Licensed under the GNU General Public License Version 2
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <dbus/dbus-glib.h>
++
++#include "xfpm-kbd-backlight.h"
++#include "xfpm-button.h"
++#include "xfpm-power.h"
++
++#define XFPM_KBD_BACKLIGHT_GET_PRIVATE(o) \
++(G_TYPE_INSTANCE_GET_PRIVATE ((o), XFPM_TYPE_KBD_BACKLIGHT, XfpmKbdBacklightPrivate))
++
++static void xfpm_kbd_backlight_finalize     (GObject *object);
++
++struct XfpmKbdBacklightPrivate
++{
++    XfpmPower       *power;
++    XfpmButton      *button;
++
++    DBusGConnection *bus;
++    DBusGProxy      *proxy;
++
++    gboolean         dimmed;
++    gboolean         on_battery;
++    gint             max_level;
++    gint             min_level;
++    gint             step;
++};
++
++G_DEFINE_TYPE (XfpmKbdBacklight, xfpm_kbd_backlight, G_TYPE_OBJECT)
++
++
++static void
++xfpm_kbd_backlight_on_battery_changed_cb (XfpmPower *power, gboolean on_battery, XfpmKbdBacklight *backlight)
++{
++    backlight->priv->on_battery = on_battery;
++}
++
++
++static void
++xfpm_kbd_backlight_init_max_level (XfpmKbdBacklight *backlight)
++{
++    GError *error = NULL;
++
++    dbus_g_proxy_call (backlight->priv->proxy, "GetMaxBrightness", &error,
++                       G_TYPE_INVALID,
++                       G_TYPE_INT, &backlight->priv->max_level,
++                       G_TYPE_INVALID);
++
++    if ( error )
++    {
++        g_warning ("Failed to get keyboard max brightness level : %s", error->message);
++        g_error_free (error);
++    }
++}
++
++
++static gint
++xfpm_kbd_backlight_get_level (XfpmKbdBacklight *backlight)
++{
++    GError *error = NULL;
++    gint level = -1;
++
++    dbus_g_proxy_call (backlight->priv->proxy, "GetBrightness", &error,
++                       G_TYPE_INVALID,
++                       G_TYPE_INT, &level,
++                       G_TYPE_INVALID);
++    if ( error )
++    {
++        g_warning ("Failed to get keyboard brightness level : %s", error->message);
++        g_error_free (error);
++    }
++    return level;
++}
++
++
++static void
++xfpm_kbd_backlight_set_level (XfpmKbdBacklight *backlight, gint level)
++{
++    GError *error = NULL;
++
++    dbus_g_proxy_call (backlight->priv->proxy, "SetBrightness", &error,
++                       G_TYPE_INT, level,
++                       G_TYPE_INVALID, G_TYPE_INVALID);
++    if ( error )
++    {
++        g_warning ("Failed to set keyboard brightness level : %s", error->message);
++        g_error_free (error);
++    }
++}
++
++static void
++xfpm_kbd_backlight_up (XfpmKbdBacklight *backlight)
++{
++    gint level;
++
++    level = xfpm_kbd_backlight_get_level(backlight);
++
++    if ( level == -1)
++        return;
++
++    if ( level == backlight->priv->max_level )
++        return;
++
++    level += backlight->priv->step;
++
++    if ( level > backlight->priv->max_level )
++        level = backlight->priv->max_level;
++
++    xfpm_kbd_backlight_set_level(backlight, level);
++}
++
++
++static void
++xfpm_kbd_backlight_down (XfpmKbdBacklight *backlight)
++{
++    gint level;
++
++    level = xfpm_kbd_backlight_get_level(backlight);
++
++    if ( level == -1)
++        return;
++
++    if ( level == backlight->priv->min_level )
++        return;
++
++    level -= backlight->priv->step;
++
++    if ( level < backlight->priv->min_level )
++        level = backlight->priv->min_level;
++
++    xfpm_kbd_backlight_set_level(backlight, level);
++}
++
++
++static void
++xfpm_kbd_backlight_button_pressed_cb (XfpmButton *button, XfpmButtonKey type, XfpmKbdBacklight *backlight)
++{
++    if ( type == BUTTON_KBD_BRIGHTNESS_UP )
++    {
++        xfpm_kbd_backlight_up (backlight);
++    }
++    else if ( type == BUTTON_KBD_BRIGHTNESS_DOWN )
++    {
++        xfpm_kbd_backlight_down (backlight);
++    }
++}
++
++
++static void
++xfpm_kbd_backlight_class_init (XfpmKbdBacklightClass *klass)
++{
++    GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++    object_class->finalize = xfpm_kbd_backlight_finalize;
++
++    g_type_class_add_private (klass, sizeof (XfpmKbdBacklightPrivate));
++}
++
++
++static void
++xfpm_kbd_backlight_init (XfpmKbdBacklight *backlight)
++{
++    GError *error = NULL;
++
++    backlight->priv = XFPM_KBD_BACKLIGHT_GET_PRIVATE (backlight);
++
++    backlight->priv->bus = NULL;
++    backlight->priv->proxy = NULL;
++    backlight->priv->power = NULL;
++    backlight->priv->button = NULL;
++    backlight->priv->dimmed = FALSE;
++    backlight->priv->on_battery = FALSE;
++    backlight->priv->max_level = 0;
++    backlight->priv->min_level = 0;
++
++    backlight->priv->bus = dbus_g_bus_get (DBUS_BUS_SYSTEM, &error);
++
++    if ( error )
++    {
++        g_critical ("Unable to get system bus connection : %s", error->message);
++        g_error_free (error);
++        goto out;
++    }
++
++    backlight->priv->proxy = dbus_g_proxy_new_for_name (backlight->priv->bus,
++                                                        "org.freedesktop.UPower",
++                                                        "/org/freedesktop/UPower/KbdBacklight",
++                                                        "org.freedesktop.UPower.KbdBacklight");
++    if ( backlight->priv->proxy == NULL )
++    {
++        g_warning ("Unable to get the interface, org.freedesktop.UPower.KbdBacklight");
++        goto out;
++    }
++
++    xfpm_kbd_backlight_init_max_level (backlight);
++
++    if ( backlight->priv->max_level == 0 )
++        goto out;
++
++    backlight->priv->step = backlight->priv->max_level / 5;
++    backlight->priv->power = xfpm_power_get ();
++    backlight->priv->button = xfpm_button_new ();
++
++    g_signal_connect (backlight->priv->button, "button-pressed",
++                      G_CALLBACK (xfpm_kbd_backlight_button_pressed_cb), backlight);
++
++    g_signal_connect (backlight->priv->power, "on-battery-changed",
++                      G_CALLBACK (xfpm_kbd_backlight_on_battery_changed_cb), backlight);
++
++    g_object_get (G_OBJECT (backlight->priv->power),
++                  "on-battery", &backlight->priv->on_battery,
++                  NULL);
++
++out:
++    ;
++}
++
++
++static void
++xfpm_kbd_backlight_finalize (GObject *object)
++{
++    XfpmKbdBacklight *backlight = NULL;
++
++    backlight = XFPM_KBD_BACKLIGHT (object);
++
++    if ( backlight->priv->power )
++        g_object_unref (backlight->priv->power );
++
++    if ( backlight->priv->button )
++        g_object_unref (backlight->priv->button);
++
++    if ( backlight->priv->proxy )
++        g_object_unref (backlight->priv->proxy);
++
++    if ( backlight->priv->bus )
++        dbus_g_connection_unref (backlight->priv->bus);
++
++    G_OBJECT_CLASS (xfpm_kbd_backlight_parent_class)->finalize (object);
++}
++
++
++XfpmKbdBacklight *
++xfpm_kbd_backlight_new (void)
++{
++    XfpmKbdBacklight *backlight = NULL;
++    backlight = g_object_new (XFPM_TYPE_KBD_BACKLIGHT, NULL);
++    return backlight;
++}
++
++
++gboolean xfpm_kbd_backlight_has_hw (XfpmKbdBacklight *backlight)
++{
++    return ( backlight->priv->proxy == NULL ) ? FALSE : TRUE;
++}
+diff --git a/src/xfpm-kbd-backlight.h b/src/xfpm-kbd-backlight.h
+new file mode 100644
+index 0000000..99569d7
+--- /dev/null
++++ b/src/xfpm-kbd-backlight.h
+@@ -0,0 +1,55 @@
++/*
++ * * Copyright (C) 2013 Sonal Santan <sonal.santan@gmail.com>
++ *
++ * Licensed under the GNU General Public License Version 2
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#ifndef __XFPM_KBD_BACKLIGHT_H
++#define __XFPM_KBD_BACKLIGHT_H
++
++#include <glib-object.h>
++
++G_BEGIN_DECLS
++
++#define XFPM_TYPE_KBD_BACKLIGHT        (xfpm_kbd_backlight_get_type () )
++#define XFPM_KBD_BACKLIGHT(o)          (G_TYPE_CHECK_INSTANCE_CAST ((o), XFPM_TYPE_KBD_BACKLIGHT, XfpmKbdBacklight))
++#define XFPM_IS_KBD_BACKLIGHT(o)       (G_TYPE_CHECK_INSTANCE_TYPE ((o), XFPM_TYPE_KBD_BACKLIGHT))
++
++typedef struct XfpmKbdBacklightPrivate XfpmKbdBacklightPrivate;
++
++typedef struct
++{
++    GObject                     parent;
++    XfpmKbdBacklightPrivate    *priv;
++
++} XfpmKbdBacklight;
++
++typedef struct
++{
++    GObjectClass                parent_class;
++
++} XfpmKbdBacklightClass;
++
++GType                           xfpm_kbd_backlight_get_type         (void) G_GNUC_CONST;
++
++XfpmKbdBacklight               *xfpm_kbd_backlight_new              (void);
++
++gboolean                        xfpm_kbd_backlight_has_hw           (XfpmKbdBacklight *backlight);
++
++G_END_DECLS
++
++#endif /* __XFPM_KBD_BACKLIGHT_H */
+diff --git a/src/xfpm-manager.c b/src/xfpm-manager.c
+index aff9431..889ff7a 100644
+--- a/src/xfpm-manager.c
++++ b/src/xfpm-manager.c
+@@ -46,6 +46,7 @@
+ #include "xfpm-console-kit.h"
+ #include "xfpm-button.h"
+ #include "xfpm-backlight.h"
++#include "xfpm-kbd-backlight.h"
+ #include "xfpm-inhibit.h"
+ #include "egg-idletime.h"
+ #include "xfpm-config.h"
+@@ -74,28 +75,29 @@ static gboolean xfpm_manager_quit (XfpmManager *manager);
+ 
+ struct XfpmManagerPrivate
+ {
+-    DBusGConnection *session_bus;
+-
+-    XfceSMClient    *client;
+-
+-    XfpmPower       *power;
+-    XfpmButton      *button;
+-    XfpmXfconf      *conf;
+-    XfpmBacklight   *backlight;
+-    XfpmConsoleKit  *console;
+-    XfpmSystemd     *systemd;
+-    XfpmDBusMonitor *monitor;
+-    XfpmDisks       *disks;
+-    XfpmInhibit     *inhibit;
+-    EggIdletime     *idle;
++    DBusGConnection    *session_bus;
++
++    XfceSMClient       *client;
++
++    XfpmPower          *power;
++    XfpmButton         *button;
++    XfpmXfconf         *conf;
++    XfpmBacklight      *backlight;
++    XfpmKbdBacklight   *kbd_backlight;
++    XfpmConsoleKit     *console;
++    XfpmSystemd        *systemd;
++    XfpmDBusMonitor    *monitor;
++    XfpmDisks          *disks;
++    XfpmInhibit        *inhibit;
++    EggIdletime        *idle;
+ #ifdef HAVE_DPMS
+-    XfpmDpms        *dpms;
++    XfpmDpms           *dpms;
+ #endif
+ 
+-    GTimer	    *timer;
++    GTimer	       *timer;
+ 
+-    gboolean	     inhibited;
+-    gboolean	     session_managed;
++    gboolean	        inhibited;
++    gboolean	        session_managed;
+ };
+ 
+ G_DEFINE_TYPE (XfpmManager, xfpm_manager, G_TYPE_OBJECT)
+@@ -151,6 +153,8 @@ xfpm_manager_finalize (GObject *object)
+ 
+     g_object_unref (manager->priv->backlight);
+ 
++    g_object_unref (manager->priv->kbd_backlight);
++
+     G_OBJECT_CLASS (xfpm_manager_parent_class)->finalize (object);
+ }
+ 
+@@ -271,6 +275,9 @@ xfpm_manager_button_pressed_cb (XfpmButton *bt, XfpmButtonKey type, XfpmManager
+     if ( type == BUTTON_MON_BRIGHTNESS_DOWN || type == BUTTON_MON_BRIGHTNESS_UP )
+         return;
+ 
++    if ( type == BUTTON_KBD_BRIGHTNESS_DOWN || type == BUTTON_KBD_BRIGHTNESS_UP )
++        return;
++
+     if ( type == BUTTON_POWER_OFF )
+     {
+         g_object_get (G_OBJECT (manager->priv->conf),
+@@ -563,6 +570,8 @@ void xfpm_manager_start (XfpmManager *manager)
+ 
+     manager->priv->backlight = xfpm_backlight_new ();
+ 
++    manager->priv->kbd_backlight = xfpm_kbd_backlight_new ();
++
+ #ifdef HAVE_DPMS
+     manager->priv->dpms = xfpm_dpms_new ();
+ #endif
+-- 
+1.9.3
+

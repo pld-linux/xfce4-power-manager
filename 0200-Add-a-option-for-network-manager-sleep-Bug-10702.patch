@@ -1,0 +1,170 @@
+From 345ec22154f6e922394f5d9e228a611048eee172 Mon Sep 17 00:00:00 2001
+From: Eric Koegel <eric.koegel@gmail.com>
+Date: Mon, 21 Apr 2014 08:45:22 +0300
+Subject: [PATCH 200/219] Add a option for network manager sleep (Bug 10702)
+
+An xfconf and settings option has been added so the user can disable
+sending network manager to sleep.
+---
+ data/interfaces/xfpm-settings.ui | 14 ++++++++++++++
+ settings/xfpm-settings.c         | 17 +++++++++++++++++
+ src/xfpm-config.h                |  1 +
+ src/xfpm-power.c                 | 22 ++++++++++++++++++++--
+ src/xfpm-xfconf.c                | 15 +++++++++++++++
+ 5 files changed, 67 insertions(+), 2 deletions(-)
+
+diff --git a/data/interfaces/xfpm-settings.ui b/data/interfaces/xfpm-settings.ui
+index fa8f72d..b0520f2 100644
+--- a/data/interfaces/xfpm-settings.ui
++++ b/data/interfaces/xfpm-settings.ui
+@@ -1348,6 +1348,20 @@
+                                         <property name="position">1</property>
+                                       </packing>
+                                     </child>
++                                    <child>
++                                      <object class="GtkCheckButton" id="network-manager-sleep">
++                                        <property name="label" translatable="yes">Notify Network Manager of suspend/hibernate</property>
++                                        <property name="visible">True</property>
++                                        <property name="can_focus">True</property>
++                                        <property name="receives_default">False</property>
++                                        <property name="draw_indicator">True</property>
++                                        <property name="tooltip-text" translatable="yes">When enabled this signals to network manager that the system is going to suspend/hibernate so it can power down the network interfaces, saving power.</property>
++                                      </object>
++                                      <packing>
++                                        <property name="expand">False</property>
++                                        <property name="position">2</property>
++                                      </packing>
++                                    </child>
+                                   </object>
+                                 </child>
+                               </object>
+diff --git a/settings/xfpm-settings.c b/settings/xfpm-settings.c
+index 123ef5b..cd3d6dd 100644
+--- a/settings/xfpm-settings.c
++++ b/settings/xfpm-settings.c
+@@ -1375,6 +1375,7 @@ xfpm_settings_advanced (XfconfChannel *channel, gboolean system_laptop,
+     GtkWidget *label;
+     GtkWidget *sleep_dpms_mode;
+     GtkWidget *suspend_dpms_mode;
++    GtkWidget *network_manager_sleep;
+     
+     GtkWidget *inact_suspend = GTK_WIDGET (gtk_builder_get_object (xml, "inactivity-suspend"));
+     GtkWidget *inact_hibernate = GTK_WIDGET (gtk_builder_get_object (xml, "inactivity-hibernate"));
+@@ -1483,6 +1484,22 @@ xfpm_settings_advanced (XfconfChannel *channel, gboolean system_laptop,
+     
+     val = xfconf_channel_get_bool (channel, PROPERTIES_PREFIX LOCK_SCREEN_ON_SLEEP, TRUE);
+     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(lock), val);
++
++    /*
++     * Network Manager Sleep for suspend/hibernate
++     */
++    network_manager_sleep = GTK_WIDGET (gtk_builder_get_object (xml, "network-manager-sleep"));
++
++#ifdef WITH_NETWORK_MANAGER
++    val = xfconf_channel_get_bool (channel, PROPERTIES_PREFIX NETWORK_MANAGER_SLEEP, TRUE);
++    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(network_manager_sleep), val);
++
++    xfconf_g_property_bind(channel, PROPERTIES_PREFIX NETWORK_MANAGER_SLEEP,
++                           G_TYPE_BOOLEAN, G_OBJECT(network_manager_sleep),
++                           "active");
++#else
++    gtk_widget_hide (network_manager_sleep);
++#endif
+ }
+ 
+ void
+diff --git a/src/xfpm-config.h b/src/xfpm-config.h
+index 39f55cc..7696826 100644
+--- a/src/xfpm-config.h
++++ b/src/xfpm-config.h
+@@ -82,6 +82,7 @@ G_BEGIN_DECLS
+ #define         SPIN_DOWN_ON_AC_TIMEOUT		"spin-down-on-ac-timeout"
+ #define         SPIN_DOWN_ON_BATTERY_TIMEOUT	"spin-down-on-battery-timeout"
+ 
++#define         NETWORK_MANAGER_SLEEP           "network-manager-sleep"
+ G_END_DECLS
+ 
+ #endif /* __XFPM_CONFIG_H */
+diff --git a/src/xfpm-power.c b/src/xfpm-power.c
+index 8283432..63b7070 100644
+--- a/src/xfpm-power.c
++++ b/src/xfpm-power.c
+@@ -285,6 +285,9 @@ xfpm_power_sleep (XfpmPower *power, const gchar *sleep_time, gboolean force)
+ {
+     GError *error = NULL;
+     gboolean lock_screen;
++#ifdef WITH_NETWORK_MANAGER
++    gboolean network_manager_sleep;
++#endif
+ 
+     if ( power->priv->inhibited && force == FALSE)
+     {
+@@ -301,7 +304,17 @@ xfpm_power_sleep (XfpmPower *power, const gchar *sleep_time, gboolean force)
+     }
+ 
+     g_signal_emit (G_OBJECT (power), signals [SLEEPING], 0);
+-    xfpm_network_manager_sleep (TRUE);
++
++#ifdef WITH_NETWORK_MANAGER
++    g_object_get (G_OBJECT (power->priv->conf),
++                  NETWORK_MANAGER_SLEEP, &network_manager_sleep,
++                  NULL);
++
++    if ( network_manager_sleep )
++    {
++        xfpm_network_manager_sleep (TRUE);
++    }
++#endif
+ 
+     g_object_get (G_OBJECT (power->priv->conf),
+ 		  LOCK_SCREEN_ON_SLEEP, &lock_screen,
+@@ -354,7 +367,12 @@ xfpm_power_sleep (XfpmPower *power, const gchar *sleep_time, gboolean force)
+     }
+ 
+     g_signal_emit (G_OBJECT (power), signals [WAKING_UP], 0);
+-    xfpm_network_manager_sleep (FALSE);
++#ifdef WITH_NETWORK_MANAGER
++    if ( network_manager_sleep )
++    {
++        xfpm_network_manager_sleep (FALSE);
++    }
++#endif
+ }
+ 
+ static void
+diff --git a/src/xfpm-xfconf.c b/src/xfpm-xfconf.c
+index 7ef8ae8..e7b1877 100644
+--- a/src/xfpm-xfconf.c
++++ b/src/xfpm-xfconf.c
+@@ -84,6 +84,9 @@ enum
+     PROP_SPIN_DOWN_DISK_ON_BATTERY,
+     PROP_SPIN_DOWN_DISK_ON_AC_TIMEOUT,
+     PROP_SPIN_DOWN_DISK_ON_BATTERY_TIMEOUT,
++#ifdef WITH_NETWORK_MANAGER
++    PROP_NETWORK_MANAGER_SLEEP,
++#endif
+     N_PROPERTIES
+ };
+ 
+@@ -561,6 +564,18 @@ xfpm_xfconf_class_init (XfpmXfconfClass *klass)
+ 							120,
+                                                         G_PARAM_READWRITE));
+ 
++#ifdef WITH_NETWORK_MANAGER
++    /**
++     * XfpmXfconf::network-manager-sleep
++     **/
++    g_object_class_install_property (object_class,
++                                     PROP_NETWORK_MANAGER_SLEEP,
++                                     g_param_spec_boolean (NETWORK_MANAGER_SLEEP,
++                                                           NULL, NULL,
++                                                           TRUE,
++                                                           G_PARAM_READWRITE));
++#endif
++
+     g_type_class_add_private (klass, sizeof (XfpmXfconfPrivate));
+ }
+ 
+-- 
+1.9.3
+

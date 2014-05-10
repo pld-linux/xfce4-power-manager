@@ -1,0 +1,25 @@
+From 6efb453da4050aea8fc7f84105061e8392e69c1f Mon Sep 17 00:00:00 2001
+From: Eric Koegel <eric.koegel@gmail.com>
+Date: Sun, 13 Apr 2014 15:35:30 +0300
+Subject: [PATCH 178/219] Fix potential uninitialized variable
+
+---
+ src/xfpm-battery.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/xfpm-battery.c b/src/xfpm-battery.c
+index dc38d32..603c8de 100644
+--- a/src/xfpm-battery.c
++++ b/src/xfpm-battery.c
+@@ -513,6 +513,8 @@ xfpm_battery_check_charge (XfpmBattery *battery)
+ 	charge = XFPM_BATTERY_CHARGE_LOW;
+     else if ( battery->priv->percentage <= critical_level )
+ 	charge = XFPM_BATTERY_CHARGE_CRITICAL;
++    else
++	charge = XFPM_BATTERY_CHARGE_UNKNOWN;
+ 
+     if ( charge != battery->priv->charge)
+     {
+-- 
+1.9.3
+

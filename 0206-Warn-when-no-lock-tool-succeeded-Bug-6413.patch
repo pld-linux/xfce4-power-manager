@@ -1,0 +1,118 @@
+From 73ed5e362f7e0754b466d7d0e824ab14fec9cd17 Mon Sep 17 00:00:00 2001
+From: Eric Koegel <eric.koegel@gmail.com>
+Date: Tue, 29 Apr 2014 15:51:57 +0300
+Subject: [PATCH 206/219] Warn when no lock tool succeeded (Bug 6413)
+
+This patch now pops up a dialog when locking the screen fails
+either from a lock on lid-close or when going to suspend. If from
+suspend it will allow the user to choose wether to continue with
+the suspend operation.
+---
+ common/xfpm-common.c |  6 ++++--
+ common/xfpm-common.h |  2 +-
+ src/xfpm-manager.c   | 10 +++++++++-
+ src/xfpm-power.c     | 24 ++++++++++++++++++++++--
+ 4 files changed, 36 insertions(+), 6 deletions(-)
+
+diff --git a/common/xfpm-common.c b/common/xfpm-common.c
+index 4297585..9073d85 100644
+--- a/common/xfpm-common.c
++++ b/common/xfpm-common.c
+@@ -52,14 +52,14 @@ GtkBuilder *xfpm_builder_new_from_string (const gchar *ui, GError **error)
+     return builder;
+ }
+ 
+-void       
++gboolean
+ xfpm_lock_screen (void)
+ {
+     gboolean ret = g_spawn_command_line_async ("xflock4", NULL);
+     
+     if ( !ret )
+     {
+-        g_spawn_command_line_async ("gnome-screensaver-command -l", NULL);
++        ret = g_spawn_command_line_async ("gnome-screensaver-command -l", NULL);
+     }
+     
+     if ( !ret )
+@@ -77,6 +77,8 @@ xfpm_lock_screen (void)
+     {
+         g_critical ("Connot lock screen\n");
+     }
++
++    return ret;
+ }
+ 
+ void       
+diff --git a/common/xfpm-common.h b/common/xfpm-common.h
+index d5b181e..ec3dd9f 100644
+--- a/common/xfpm-common.h
++++ b/common/xfpm-common.h
+@@ -40,7 +40,7 @@ gboolean        xfpm_string_to_bool     	(const gchar *string) G_GNUC_PURE;
+ GtkBuilder     *xfpm_builder_new_from_string   	(const gchar *file,
+ 						 GError **error);
+ 
+-void       	xfpm_lock_screen  		(void);
++gboolean   	xfpm_lock_screen  		(void);
+ 
+ void       	xfpm_preferences		(void);
+ 
+diff --git a/src/xfpm-manager.c b/src/xfpm-manager.c
+index 889ff7a..dd8e0c4 100644
+--- a/src/xfpm-manager.c
++++ b/src/xfpm-manager.c
+@@ -343,7 +343,15 @@ xfpm_manager_lid_changed_cb (XfpmPower *power, gboolean lid_is_closed, XfpmManag
+ 	else if ( action == LID_TRIGGER_LOCK_SCREEN )
+ 	{
+ 	    if ( !xfpm_is_multihead_connected () )
+-		xfpm_lock_screen ();
++	    {
++		if (!xfpm_lock_screen ())
++		{
++		    xfce_dialog_show_error (NULL, NULL,
++					    _("None of the screen lock tools ran "
++					      "successfully, the screen will not "
++					      "be locked."));
++		}
++	    }
+ 	}
+ 	else
+ 	{
+diff --git a/src/xfpm-power.c b/src/xfpm-power.c
+index 2ae9dc8..3512ded 100644
+--- a/src/xfpm-power.c
++++ b/src/xfpm-power.c
+@@ -322,8 +322,28 @@ xfpm_power_sleep (XfpmPower *power, const gchar *sleep_time, gboolean force)
+ 
+     if ( lock_screen )
+     {
+-	g_usleep (2000000); /* 2 seconds */
+-	xfpm_lock_screen ();
++#ifdef WITH_NETWORK_MANAGER
++        if ( network_manager_sleep )
++        {
++	    /* 2 seconds, to give network manager time to sleep */
++            g_usleep (2000000);
++	}
++#endif
++        if (!xfpm_lock_screen ())
++        {
++	    gboolean ret;
++
++	    ret = xfce_dialog_confirm (NULL,
++				       GTK_STOCK_OK, _("Continue"),
++			               _("None of the screen lock tools ran "
++				         "successfully, the screen will not "
++					 "be locked."),
++				       _("Do you still want to continue to "
++				         "suspend the system?"));
++
++	    if ( !ret )
++		return;
++        }
+     }
+ 
+     if ( LOGIND_RUNNING () )
+-- 
+1.9.3
+

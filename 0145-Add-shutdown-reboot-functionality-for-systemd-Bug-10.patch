@@ -1,0 +1,639 @@
+From 12f16e0e6a24ee009bc534e00c476939824cd4aa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andreas=20M=C3=BCller?= <schnitzeltony@googlemail.com>
+Date: Mon, 13 Jan 2014 13:20:15 +0300
+Subject: [PATCH 145/219] Add shutdown/reboot functionality for systemd (Bug
+ 10167)
+
+based on the xfce4-session implementation [1]
+[1] http://git.xfce.org/xfce/xfce4-session/commit/?id=ae28aef315a7a6b90f1649ce6d1f30b842791cbf
+
+Guido Berhoerster assisted by allowing polkit support without
+needing systemd.
+
+Eric Koegel changed the xfpm-systemd.c code to use xfpm's internal
+polkit code rather than require an external dependancy so the checks
+can be done at runtime.
+---
+ src/Makefile.am    |   2 +
+ src/xfpm-manager.c |  38 +++++++--
+ src/xfpm-power.c   | 123 +++++++++++++++++++++++-----
+ src/xfpm-systemd.c | 229 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/xfpm-systemd.h |  62 +++++++++++++++
+ 5 files changed, 426 insertions(+), 28 deletions(-)
+ create mode 100644 src/xfpm-systemd.c
+ create mode 100644 src/xfpm-systemd.h
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 0435bed..e6e8ed3 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -20,6 +20,8 @@ xfce4_power_manager_SOURCES =                   \
+ 	xfpm-disks.h				\
+ 	xfpm-console-kit.c			\
+ 	xfpm-console-kit.h			\
++	xfpm-systemd.c				\
++	xfpm-systemd.h				\
+ 	egg-idletime.c				\
+ 	egg-idletime.h				\
+ 	xfpm-backlight.c			\
+diff --git a/src/xfpm-manager.c b/src/xfpm-manager.c
+index 853d78c..aff9431 100644
+--- a/src/xfpm-manager.c
++++ b/src/xfpm-manager.c
+@@ -57,6 +57,8 @@
+ #include "xfpm-enum-glib.h"
+ #include "xfpm-enum-types.h"
+ #include "xfpm-dbus-monitor.h"
++#include "xfpm-systemd.h"
++
+ 
+ static void xfpm_manager_finalize   (GObject *object);
+ 
+@@ -81,6 +83,7 @@ struct XfpmManagerPrivate
+     XfpmXfconf      *conf;
+     XfpmBacklight   *backlight;
+     XfpmConsoleKit  *console;
++    XfpmSystemd     *systemd;
+     XfpmDBusMonitor *monitor;
+     XfpmDisks       *disks;
+     XfpmInhibit     *inhibit;
+@@ -131,7 +134,10 @@ xfpm_manager_finalize (GObject *object)
+     g_object_unref (manager->priv->button);
+     g_object_unref (manager->priv->conf);
+     g_object_unref (manager->priv->client);
+-    g_object_unref (manager->priv->console);
++    if ( manager->priv->systemd != NULL )
++        g_object_unref (manager->priv->systemd);
++    if ( manager->priv->console != NULL )
++        g_object_unref (manager->priv->console);
+     g_object_unref (manager->priv->monitor);
+     g_object_unref (manager->priv->disks);
+     g_object_unref (manager->priv->inhibit);
+@@ -201,7 +207,11 @@ static void
+ xfpm_manager_shutdown (XfpmManager *manager)
+ {
+     GError *error = NULL;
+-    xfpm_console_kit_shutdown (manager->priv->console, &error );
++
++    if ( LOGIND_RUNNING () )
++        xfpm_systemd_shutdown (manager->priv->systemd, &error );
++    else
++        xfpm_console_kit_shutdown (manager->priv->console, &error );
+ 
+     if ( error )
+     {
+@@ -521,7 +531,14 @@ void xfpm_manager_start (XfpmManager *manager)
+     manager->priv->power = xfpm_power_get ();
+     manager->priv->button = xfpm_button_new ();
+     manager->priv->conf = xfpm_xfconf_new ();
+-    manager->priv->console = xfpm_console_kit_new ();
++    manager->priv->console = NULL;
++    manager->priv->systemd = NULL;
++
++    if ( LOGIND_RUNNING () )
++        manager->priv->systemd = xfpm_systemd_new ();
++    else
++        manager->priv->console = xfpm_console_kit_new ();
++
+     manager->priv->monitor = xfpm_dbus_monitor_new ();
+     manager->priv->disks = xfpm_disks_new ();
+     manager->priv->inhibit = xfpm_inhibit_new ();
+@@ -603,9 +620,18 @@ GHashTable *xfpm_manager_get_config (XfpmManager *manager)
+ 
+     hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+ 
+-    g_object_get (G_OBJECT (manager->priv->console),
+-		  "can-shutdown", &can_shutdown,
+-		  NULL);
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (manager->priv->systemd),
++                      "can-shutdown", &can_shutdown,
++                      NULL);
++    }
++    else
++    {
++        g_object_get (G_OBJECT (manager->priv->console),
++                      "can-shutdown", &can_shutdown,
++                      NULL);
++    }
+ 
+     g_object_get (G_OBJECT (manager->priv->power),
+                   "auth-suspend", &auth_suspend,
+diff --git a/src/xfpm-power.c b/src/xfpm-power.c
+index d703f8e..a53753f 100644
+--- a/src/xfpm-power.c
++++ b/src/xfpm-power.c
+@@ -50,6 +50,8 @@
+ #include "xfpm-debug.h"
+ #include "xfpm-enum-types.h"
+ #include "egg-idletime.h"
++#include "xfpm-systemd.h"
++
+ 
+ static void xfpm_power_finalize     (GObject *object);
+ 
+@@ -75,6 +77,8 @@ struct XfpmPowerPrivate
+ 
+     GHashTable      *hash;
+ 
++
++    XfpmSystemd     *systemd;
+     XfpmConsoleKit  *console;
+     XfpmInhibit	    *inhibit;
+     XfpmXfconf      *conf;
+@@ -680,9 +684,19 @@ xfpm_power_add_actions_to_notification (XfpmPower *power, NotifyNotification *n)
+ {
+     gboolean can_shutdown;
+ 
+-    g_object_get (G_OBJECT (power->priv->console),
+-		  "can-shutdown", &can_shutdown,
+-		  NULL);
++
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (power->priv->systemd),
++                      "can-shutdown", &can_shutdown,
++                      NULL);
++    }
++    else
++    {
++        g_object_get (G_OBJECT (power->priv->console),
++                      "can-shutdown", &can_shutdown,
++                      NULL);
++    }
+ 
+     if (  power->priv->can_hibernate && power->priv->auth_hibernate )
+     {
+@@ -756,9 +770,18 @@ xfpm_power_show_critical_action_gtk (XfpmPower *power)
+     const gchar *message;
+     gboolean can_shutdown;
+ 
+-    g_object_get (G_OBJECT (power->priv->console),
+-		  "can-shutdown", &can_shutdown,
+-		  NULL);
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (power->priv->systemd),
++                      "can-shutdown", &can_shutdown,
++                      NULL);
++    }
++    else
++    {
++        g_object_get (G_OBJECT (power->priv->console),
++                      "can-shutdown", &can_shutdown,
++                      NULL);
++    }
+ 
+     message = _("System is running on low power. "\
+                "Save your work to avoid losing data");
+@@ -1327,7 +1350,13 @@ xfpm_power_init (XfpmPower *power)
+     power->priv->inhibit = xfpm_inhibit_new ();
+     power->priv->notify  = xfpm_notify_new ();
+     power->priv->conf    = xfpm_xfconf_new ();
+-    power->priv->console = xfpm_console_kit_new ();
++
++    power->priv->systemd = NULL;
++    power->priv->console = NULL;
++    if ( LOGIND_RUNNING () )
++        power->priv->systemd = xfpm_systemd_new ();
++    else
++	power->priv->console = xfpm_console_kit_new ();
+ 
+     g_signal_connect_swapped (power->priv->conf, "notify::" SHOW_TRAY_ICON_CFG,
+ 			      G_CALLBACK (xfpm_power_refresh_adaptor_visible), power);
+@@ -1445,7 +1474,11 @@ xfpm_power_finalize (GObject *object)
+     g_object_unref (power->priv->inhibit);
+     g_object_unref (power->priv->notify);
+     g_object_unref (power->priv->conf);
+-    g_object_unref (power->priv->console);
++
++    if ( power->priv->systemd != NULL )
++        g_object_unref (power->priv->systemd);
++    if ( power->priv->console != NULL )
++        g_object_unref (power->priv->console);
+ 
+     xfpm_power_hide_adapter_icon (power);
+ 
+@@ -1607,9 +1640,18 @@ static gboolean xfpm_power_dbus_shutdown (XfpmPower *power,
+ {
+     gboolean can_reboot;
+ 
+-    g_object_get (G_OBJECT (power->priv->console),
+-		  "can-shutdown", &can_reboot,
+-		  NULL);
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (power->priv->systemd),
++                      "can-shutdown", &can_reboot,
++                      NULL);
++    }
++    else
++    {
++        g_object_get (G_OBJECT (power->priv->console),
++                      "can-shutdown", &can_reboot,
++                      NULL);
++    }
+ 
+     if ( !can_reboot)
+     {
+@@ -1618,7 +1660,10 @@ static gboolean xfpm_power_dbus_shutdown (XfpmPower *power,
+         return FALSE;
+     }
+ 
+-    xfpm_console_kit_shutdown (power->priv->console, error);
++    if ( LOGIND_RUNNING () )
++        xfpm_systemd_shutdown (power->priv->systemd, error);
++    else
++	xfpm_console_kit_shutdown (power->priv->console, error);
+ 
+     return TRUE;
+ }
+@@ -1628,9 +1673,18 @@ static gboolean xfpm_power_dbus_reboot   (XfpmPower *power,
+ {
+     gboolean can_reboot;
+ 
+-    g_object_get (G_OBJECT (power->priv->console),
+-		  "can-restart", &can_reboot,
+-		  NULL);
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (power->priv->systemd),
++                      "can-restart", &can_reboot,
++                      NULL);
++    }
++    else
++    {
++        g_object_get (G_OBJECT (power->priv->console),
++                      "can-restart", &can_reboot,
++                      NULL);
++    }
+ 
+     if ( !can_reboot)
+     {
+@@ -1639,7 +1693,11 @@ static gboolean xfpm_power_dbus_reboot   (XfpmPower *power,
+         return FALSE;
+     }
+ 
+-    xfpm_console_kit_reboot (power->priv->console, error);
++   if ( LOGIND_RUNNING () )
++        xfpm_systemd_reboot (power->priv->systemd, error);
++    else
++	xfpm_console_kit_reboot (power->priv->console, error);
++
+ 
+     return TRUE;
+ }
+@@ -1694,9 +1752,19 @@ static gboolean xfpm_power_dbus_can_reboot (XfpmPower * power,
+ 					  gboolean * OUT_can_reboot,
+ 					  GError ** error)
+ {
+-    g_object_get (G_OBJECT (power->priv->console),
+-		  "can-reboot", OUT_can_reboot,
+-		  NULL);
++
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (power->priv->systemd),
++                      "can-reboot", OUT_can_reboot,
++                      NULL);
++    }
++    else
++    {
++        g_object_get (G_OBJECT (power->priv->console),
++                      "can-reboot", OUT_can_reboot,
++		      NULL);
++    }
+ 
+     return TRUE;
+ }
+@@ -1705,9 +1773,20 @@ static gboolean xfpm_power_dbus_can_shutdown (XfpmPower * power,
+ 					    gboolean * OUT_can_shutdown,
+ 					    GError ** error)
+ {
+-    g_object_get (G_OBJECT (power->priv->console),
+-		  "can-shutdown", OUT_can_shutdown,
+-		  NULL);
++
++    if ( LOGIND_RUNNING () )
++    {
++        g_object_get (G_OBJECT (power->priv->systemd),
++                  "can-shutdown", OUT_can_shutdown,
++                  NULL);
++    }
++    else
++    {
++	g_object_get (G_OBJECT (power->priv->console),
++		      "can-shutdown", OUT_can_shutdown,
++		      NULL);
++    }
++
+     return TRUE;
+ }
+ 
+diff --git a/src/xfpm-systemd.c b/src/xfpm-systemd.c
+new file mode 100644
+index 0000000..2b840db
+--- /dev/null
++++ b/src/xfpm-systemd.c
+@@ -0,0 +1,229 @@
++/*
++ * * Copyright (C) 2009-2011 Ali <aliov@xfce.org>
++ * * Copyright (C) 2013 Andreas Müller <schnitzeltony@googlemail.com>
++ *
++ * Licensed under the GNU General Public License Version 2
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <gio/gio.h>
++
++#include "xfpm-systemd.h"
++#include "xfpm-polkit.h"
++
++static void xfpm_systemd_finalize   (GObject *object);
++
++static void xfpm_systemd_get_property (GObject *object,
++                                       guint prop_id,
++                                       GValue *value,
++                                       GParamSpec *pspec);
++
++#define XFPM_SYSTEMD_GET_PRIVATE(o) \
++(G_TYPE_INSTANCE_GET_PRIVATE ((o), XFPM_TYPE_SYSTEMD, XfpmSystemdPrivate))
++
++struct XfpmSystemdPrivate
++{
++    gboolean         can_shutdown;
++    gboolean         can_restart;
++#ifdef ENABLE_POLKIT
++    XfpmPolkit      *polkit;
++#endif
++};
++
++enum
++{
++    PROP_0,
++    PROP_CAN_RESTART,
++    PROP_CAN_SHUTDOWN
++};
++
++G_DEFINE_TYPE (XfpmSystemd, xfpm_systemd, G_TYPE_OBJECT)
++
++#define SYSTEMD_DBUS_NAME               "org.freedesktop.login1"
++#define SYSTEMD_DBUS_PATH               "/org/freedesktop/login1"
++#define SYSTEMD_DBUS_INTERFACE          "org.freedesktop.login1.Manager"
++#define SYSTEMD_REBOOT_ACTION           "Reboot"
++#define SYSTEMD_POWEROFF_ACTION         "PowerOff"
++#define SYSTEMD_REBOOT_TEST             "org.freedesktop.login1.reboot"
++#define SYSTEMD_POWEROFF_TEST           "org.freedesktop.login1.power-off"
++
++static void
++xfpm_systemd_class_init (XfpmSystemdClass *klass)
++{
++    GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++    object_class->finalize = xfpm_systemd_finalize;
++
++    object_class->get_property = xfpm_systemd_get_property;
++
++    g_object_class_install_property (object_class,
++                                     PROP_CAN_RESTART,
++                                     g_param_spec_boolean ("can-restart",
++                                                           NULL, NULL,
++                                                           FALSE,
++                                                           G_PARAM_READABLE));
++
++    g_object_class_install_property (object_class,
++                                     PROP_CAN_SHUTDOWN,
++                                     g_param_spec_boolean ("can-shutdown",
++                                                           NULL, NULL,
++                                                           FALSE,
++                                                           G_PARAM_READABLE));
++
++    g_type_class_add_private (klass, sizeof (XfpmSystemdPrivate));
++}
++
++static gboolean
++xfpm_systemd_can_method (XfpmSystemd  *systemd,
++                         gboolean     *can_method,
++                         const gchar  *method)
++{
++    *can_method = FALSE;
++
++#ifdef ENABLE_POLKIT
++    *can_method = xfpm_polkit_check_auth(systemd->priv->polkit, method);
++
++    return TRUE;
++#endif
++
++    return FALSE;
++}
++
++static void
++xfpm_systemd_init (XfpmSystemd *systemd)
++{
++    systemd->priv = XFPM_SYSTEMD_GET_PRIVATE (systemd);
++    systemd->priv->can_shutdown = FALSE;
++    systemd->priv->can_restart  = FALSE;
++#ifdef ENABLE_POLKIT
++    systemd->priv->polkit = xfpm_polkit_get();
++#endif
++
++    xfpm_systemd_can_method (systemd,
++                             &systemd->priv->can_shutdown,
++                             SYSTEMD_POWEROFF_TEST);
++    xfpm_systemd_can_method (systemd,
++                             &systemd->priv->can_restart,
++                             SYSTEMD_REBOOT_TEST);
++}
++
++static void xfpm_systemd_get_property (GObject *object,
++                       guint prop_id,
++                       GValue *value,
++                       GParamSpec *pspec)
++{
++    XfpmSystemd *systemd;
++    systemd = XFPM_SYSTEMD (object);
++
++    switch (prop_id)
++    {
++    case PROP_CAN_SHUTDOWN:
++        g_value_set_boolean (value, systemd->priv->can_shutdown);
++        break;
++    case PROP_CAN_RESTART:
++        g_value_set_boolean (value, systemd->priv->can_restart);
++        break;
++        default:
++            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++            break;
++    }
++}
++
++static void
++xfpm_systemd_finalize (GObject *object)
++{
++    XfpmSystemd *systemd;
++
++    systemd = XFPM_SYSTEMD (object);
++
++#ifdef ENABLE_POLKIT
++    if(systemd->priv->polkit)
++    {
++        g_object_unref (G_OBJECT (systemd->priv->polkit));
++        systemd->priv->polkit = NULL;
++    }
++#endif
++
++    G_OBJECT_CLASS (xfpm_systemd_parent_class)->finalize (object);
++}
++
++XfpmSystemd *
++xfpm_systemd_new (void)
++{
++    static gpointer systemd_obj = NULL;
++
++    if ( G_LIKELY (systemd_obj != NULL ) )
++    {
++    g_object_ref (systemd_obj);
++    }
++    else
++    {
++    systemd_obj = g_object_new (XFPM_TYPE_SYSTEMD, NULL);
++    g_object_add_weak_pointer (systemd_obj, &systemd_obj);
++    }
++
++    return XFPM_SYSTEMD (systemd_obj);
++}
++
++static void
++xfpm_systemd_try_method (XfpmSystemd  *systemd,
++                         const gchar  *method,
++                         GError      **error)
++{
++    GDBusConnection *bus;
++    GError          *local_error = NULL;
++
++    bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, error);
++    if (G_LIKELY (bus != NULL))
++    {
++        g_dbus_connection_call_sync (bus,
++                                     SYSTEMD_DBUS_NAME,
++                                     SYSTEMD_DBUS_PATH,
++                                     SYSTEMD_DBUS_INTERFACE,
++                                     method,
++                                     g_variant_new ("(b)", TRUE),
++                                     NULL, 0, G_MAXINT, NULL,
++                                     &local_error);
++        g_object_unref (G_OBJECT (bus));
++
++        if (local_error != NULL)
++        {
++            g_propagate_error (error, local_error);
++        }
++    }
++}
++
++void xfpm_systemd_shutdown (XfpmSystemd *systemd, GError **error)
++{
++    xfpm_systemd_try_method (systemd,
++                             SYSTEMD_POWEROFF_ACTION,
++                             error);
++}
++
++void xfpm_systemd_reboot (XfpmSystemd *systemd, GError **error)
++{
++    xfpm_systemd_try_method (systemd,
++                             SYSTEMD_REBOOT_ACTION,
++                             error);
++}
+diff --git a/src/xfpm-systemd.h b/src/xfpm-systemd.h
+new file mode 100644
+index 0000000..7ade4f4
+--- /dev/null
++++ b/src/xfpm-systemd.h
+@@ -0,0 +1,62 @@
++/*
++ * * Copyright (C) 2009-2011 Ali <aliov@xfce.org>
++ * * Copyright (C) 2013 Andreas Müller <schnitzeltony@googlemail.com>
++ *
++ * Licensed under the GNU General Public License Version 2
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#ifndef __XFPM_SYSTEMD_H
++#define __XFPM_SYSTEMD_H
++
++#include <glib-object.h>
++
++G_BEGIN_DECLS
++
++#define LOGIND_RUNNING() (access ("/run/systemd/seats/", F_OK) >= 0)
++
++#define XFPM_TYPE_SYSTEMD            (xfpm_systemd_get_type () )
++#define XFPM_SYSTEMD(o)              (G_TYPE_CHECK_INSTANCE_CAST ((o), XFPM_TYPE_SYSTEMD, XfpmSystemd))
++#define XFPM_IS_SYSTEMD(o)           (G_TYPE_CHECK_INSTANCE_TYPE ((o), XFPM_TYPE_SYSTEMD))
++
++typedef struct XfpmSystemdPrivate XfpmSystemdPrivate;
++
++typedef struct
++{
++    GObject                 parent;
++    XfpmSystemdPrivate      *priv;
++
++} XfpmSystemd;
++
++typedef struct
++{
++    GObjectClass        parent_class;
++
++} XfpmSystemdClass;
++
++GType               xfpm_systemd_get_type   (void) G_GNUC_CONST;
++
++XfpmSystemd         *xfpm_systemd_new   (void);
++
++void                xfpm_systemd_shutdown   (XfpmSystemd *systemd,
++                                             GError **error);
++
++void                xfpm_systemd_reboot (XfpmSystemd *systemd,
++                                         GError **error);
++
++G_END_DECLS
++
++#endif /* __XFPM_SYSTEMD_H */
+-- 
+1.9.3
+

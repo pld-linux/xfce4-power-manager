@@ -1,0 +1,192 @@
+From 81ca9ce560854b6c2c6f6194ef5652ff16ba4eea Mon Sep 17 00:00:00 2001
+From: Eric Koegel <eric.koegel@gmail.com>
+Date: Mon, 13 Jan 2014 15:42:42 +0300
+Subject: [PATCH 149/219] Update to XFCE_PANEL_PLUGIN_REGISTER
+
+Updates from the per-4.8 panel registration method. Also updates
+the gtk about function for the new field and updates the makefile
+for the plugin.
+---
+ common/xfpm-common.c                               |  4 +-
+ panel-plugins/brightness/Makefile.am               | 31 ++++++++---
+ panel-plugins/brightness/brightness-button.c       |  7 +--
+ panel-plugins/brightness/brightness-plugin.c       | 62 +++++++++++++++++++---
+ .../xfce4-brightness-plugin.desktop.in.in          |  3 +-
+ 5 files changed, 83 insertions(+), 24 deletions(-)
+
+diff --git a/common/xfpm-common.c b/common/xfpm-common.c
+index eca2ed5..ecfc6c9 100644
+--- a/common/xfpm-common.c
++++ b/common/xfpm-common.c
+@@ -151,10 +151,10 @@ xfpm_about (GtkWidget *widget, gpointer data)
+ 		     "destroy-with-parent", TRUE,
+ 		     "documenters", documenters,
+ 		     "license", XFCE_LICENSE_GPL,
+-		     "name", package,
++		     "program-name", package,
+ 		     "translator-credits", _("translator-credits"),
+ 		     "version", PACKAGE_VERSION,
+-		     "website", "http://goodies.xfce.org",
++		     "website", "http://goodies.xfce.org/projects/applications/xfce4-power-manager",
+ 		     NULL);
+ 						 
+ }
+diff --git a/panel-plugins/brightness/Makefile.am b/panel-plugins/brightness/Makefile.am
+index 33836b0..a89ca8b 100644
+--- a/panel-plugins/brightness/Makefile.am
++++ b/panel-plugins/brightness/Makefile.am
+@@ -1,12 +1,24 @@
+-plugindir = $(libdir)/xfce4/panel-plugins
+-plugin_PROGRAMS = xfce4-brightness-plugin
++INCLUDES = \
++	-I$(top_srcdir) \
++	-DG_LOG_DOMAIN=\"xfce4-brightness-plugin\" \
++	-DPACKAGE_LOCALE_DIR=\"$(localedir)\" \
++	$(PLATFORM_CPPFLAGS)
+ 
+-xfce4_brightness_plugin_SOURCES =		\
++#
++# xfce4 brightness plugin
++#
++plugin_LTLIBRARIES = \
++	libxfce4brightness.la
++
++plugindir = \
++	$(libdir)/xfce4/panel/plugins
++
++libxfce4brightness_la_SOURCES =		\
+ 	brightness-plugin.c			\
+ 	brightness-button.c			\
+ 	brightness-button.h
+ 
+-xfce4_brightness_plugin_CFLAGS =		\
++libxfce4brightness_la_CFLAGS =		\
+ 	-I$(top_srcdir)				\
+ 	-I$(top_srcdir)/src			\
+ 	-DLOCALEDIR=\"$(localedir)\"  		\
+@@ -19,11 +31,14 @@ xfce4_brightness_plugin_CFLAGS =		\
+ 	$(PLATFORM_CPPFLAGS)			\
+ 	$(PLATFORM_CFLAGS)
+ 
+-xfce4_brightness_plugin_LDFLAGS =		\
+-	-no-undefined				\
+-	$(PLATFORM_LDFLAGS)
++libxfce4brightness_la_LDFLAGS =		\
++       -avoid-version \
++       -module \
++       -no-undefined \
++       -export-symbols-regex '^xfce_panel_module_(preinit|init|construct)' \
++       $(PLATFORM_LDFLAGS)
+ 
+-xfce4_brightness_plugin_LDADD =			\
++libxfce4brightness_la_LIBADD =			\
+ 	$(top_builddir)/common/libxfpmcommon.la \
+ 	$(LIBXFCE4PANEL_LIBS)   		\
+ 	$(LIBXFCE4UI_LIBS)			\
+diff --git a/panel-plugins/brightness/brightness-button.c b/panel-plugins/brightness/brightness-button.c
+index bd466c9..8c527bf 100644
+--- a/panel-plugins/brightness/brightness-button.c
++++ b/panel-plugins/brightness/brightness-button.c
+@@ -619,12 +619,9 @@ void brightness_button_show (BrightnessButton *button)
+     GtkWidget *mi;
+     
+     g_return_if_fail (BRIGHTNESS_IS_BUTTON (button));
+-    
+-    gtk_container_add (GTK_CONTAINER (button->priv->plugin),
+-		       GTK_WIDGET (button));
+-		       
++
+     xfce_panel_plugin_add_action_widget (button->priv->plugin, GTK_WIDGET (button));
+-    
++
+     button->priv->image = gtk_image_new ();
+     gtk_container_add (GTK_CONTAINER (button), button->priv->image);
+     
+diff --git a/panel-plugins/brightness/brightness-plugin.c b/panel-plugins/brightness/brightness-plugin.c
+index f7e84d0..3df91dc 100644
+--- a/panel-plugins/brightness/brightness-plugin.c
++++ b/panel-plugins/brightness/brightness-plugin.c
+@@ -34,14 +34,60 @@
+ 
+ #include "brightness-button.h"
+ 
+-static void
+-register_brightness_plugin (XfcePanelPlugin *plugin)
++/* plugin structure */
++typedef struct
+ {
+-    GtkWidget *button;
+-    
+-    button = brightness_button_new (plugin);
+-    
+-    brightness_button_show (BRIGHTNESS_BUTTON (button));
++    XfcePanelPlugin *plugin;
++
++    /* panel widgets */
++    GtkWidget       *ebox;
++    GtkWidget       *brightness_button;
+ }
++BrightnessPlugin;
++
++/* prototypes */
++static void brightness_plugin_construct (XfcePanelPlugin *plugin);
++
++
++/* register the plugin */
++XFCE_PANEL_PLUGIN_REGISTER (brightness_plugin_construct);
++
++
++static BrightnessPlugin *
++brightness_plugin_new (XfcePanelPlugin *plugin)
++{
++    BrightnessPlugin *brightness_plugin;
++
++    /* allocate memory for the plugin structure */
++    brightness_plugin = panel_slice_new0 (BrightnessPlugin);
++
++    /* pointer to plugin */
++    brightness_plugin->plugin = plugin;
++
++    /* pointer to plugin */
++    brightness_plugin->plugin = plugin;
+ 
+-XFCE_PANEL_PLUGIN_REGISTER_EXTERNAL(register_brightness_plugin);
++    /* create some panel ebox */
++    brightness_plugin->ebox = gtk_event_box_new ();
++    gtk_widget_show (brightness_plugin->ebox);
++    gtk_event_box_set_visible_window (GTK_EVENT_BOX(brightness_plugin->ebox), FALSE);
++
++    brightness_plugin->brightness_button = brightness_button_new (plugin);
++    brightness_button_show(BRIGHTNESS_BUTTON(brightness_plugin->brightness_button));
++    gtk_container_add (GTK_CONTAINER (brightness_plugin->ebox), brightness_plugin->brightness_button);
++
++    return brightness_plugin;
++}
++
++
++static void
++brightness_plugin_construct (XfcePanelPlugin *plugin)
++{
++    BrightnessPlugin *brightness_plugin;
++
++    /* create the plugin */
++    brightness_plugin = brightness_plugin_new (plugin);
++
++    /* add the ebox to the panel */
++    gtk_container_add (GTK_CONTAINER (plugin), brightness_plugin->ebox);
++}
+diff --git a/panel-plugins/brightness/xfce4-brightness-plugin.desktop.in.in b/panel-plugins/brightness/xfce4-brightness-plugin.desktop.in.in
+index 6adccea..f03f4fd 100644
+--- a/panel-plugins/brightness/xfce4-brightness-plugin.desktop.in.in
++++ b/panel-plugins/brightness/xfce4-brightness-plugin.desktop.in.in
+@@ -3,5 +3,6 @@ Type=X-XFCE-PanelPlugin
+ _Name=Brightness plugin
+ _Comment=Control your LCD brightness
+ Icon=xfpm-brightness-lcd
+-X-XFCE-Exec=@libdir@/xfce4/panel-plugins/xfce4-brightness-plugin
++X-XFCE-Module=xfce4brightness
+ X-XFCE-Unique=TRUE
++X-XFCE-Internal=false
+-- 
+1.9.3
+
