@@ -2,7 +2,7 @@ Summary:	Power manager for the Xfce desktop environment
 Summary(pl.UTF-8):	Zarządca energii dla środowiska Xfce
 Name:		xfce4-power-manager
 Version:	1.4.1
-Release:	1
+Release:	2
 License:	GPL v2
 Group:		X11/Applications
 Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/1.4/%{name}-%{version}.tar.bz2
@@ -57,7 +57,7 @@ rm -rf $RPM_BUILD_ROOT
 	DESTDIR=$RPM_BUILD_ROOT
 
 %{__rm} -r $RPM_BUILD_ROOT%{_datadir}/locale/ur_PK
-%{__rm} $RPM_BUILD_ROOT%{_libdir}/xfce4/panel/plugins/libxfce4battery.la
+%{__rm} $RPM_BUILD_ROOT%{_libdir}/xfce4/panel/plugins/libxfce4powermanager.la
 
 %find_lang %{name}
 
@@ -78,9 +78,9 @@ rm -rf $RPM_BUILD_ROOT
 %attr(755,root,root) %{_bindir}/xfce4-power-manager-settings
 %attr(755,root,root) %{_sbindir}/xfpm-power-backlight-helper
 %attr(755,root,root) %{_sbindir}/xfce4-pm-helper
-%attr(755,root,root) %{_libdir}/xfce4/panel/plugins/libxfce4battery.so
+%attr(755,root,root) %{_libdir}/xfce4/panel/plugins/libxfce4powermanager.so
 %{_desktopdir}/xfce4-power-manager-settings.desktop
-%{_datadir}/xfce4/panel-plugins/xfce4-battery-plugin.desktop
+%{_datadir}/xfce4/panel/plugins/power-manager-plugin.desktop
 %{_iconsdir}/hicolor/*/*/*
 %{_datadir}/polkit-1/actions/org.xfce.power.policy
 %{_datadir}/appdata/xfce4-power-manager.appdata.xml
