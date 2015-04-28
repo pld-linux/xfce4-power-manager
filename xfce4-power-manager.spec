@@ -27,6 +27,7 @@ BuildRequires:	xfconf-devel >= 4.12.0
 Requires:	gtk-update-icon-cache
 Requires:	upower
 Requires:	xfce4-dirs >= 4.6
+Provides:	xfce4-battery-plugin
 Obsoletes:	xfce4-battery-plugin
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
