@@ -1,12 +1,12 @@
 Summary:	Power manager for the Xfce desktop environment
 Summary(pl.UTF-8):	Zarządca energii dla środowiska Xfce
 Name:		xfce4-power-manager
-Version:	1.6.1
+Version:	1.6.2
 Release:	1
 License:	GPL v2
 Group:		X11/Applications
 Source0:	http://archive.xfce.org/src/apps/xfce4-power-manager/1.6/%{name}-%{version}.tar.bz2
-# Source0-md5:	17f0e6464ad6b3bc6a657f595bf91430
+# Source0-md5:	2a49be4eca78fb519984db5aae38e4ab
 URL:		http://goodies.xfce.org/projects/applications/xfce4-power-manager
 BuildRequires:	autoconf >= 2.50
 BuildRequires:	automake >= 1:1.8
@@ -87,5 +87,5 @@ rm -rf $RPM_BUILD_ROOT
 %{_datadir}/xfce4/panel/plugins/power-manager-plugin.desktop
 %{_iconsdir}/hicolor/*/*/*
 %{_datadir}/polkit-1/actions/org.xfce.power.policy
-%{_datadir}/appdata/xfce4-power-manager.appdata.xml
+%{_datadir}/metainfo/xfce4-power-manager.appdata.xml
 %{_mandir}/man1/xfce4-power-manager*.1*
