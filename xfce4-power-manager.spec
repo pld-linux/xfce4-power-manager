@@ -1,18 +1,18 @@
 Summary:	Power manager for the Xfce desktop environment
 Summary(pl.UTF-8):	Zarządca energii dla środowiska Xfce
 Name:		xfce4-power-manager
-Version:	1.6.6
+Version:	4.16.0
 Release:	1
 License:	GPL v2
 Group:		X11/Applications
-Source0:	https://archive.xfce.org/src/xfce/%{name}/1.6/%{name}-%{version}.tar.bz2
-# Source0-md5:	19873fc8a6de5e37ed57036a0002a5ce
+Source0:	https://archive.xfce.org/src/xfce/xfce4-power-manager/4.16/%{name}-%{version}.tar.bz2
+# Source0-md5:	6fbf95dcfe2154be4ff252545c7c887b
 URL:		http://goodies.xfce.org/projects/applications/xfce4-power-manager
 BuildRequires:	autoconf >= 2.50
 BuildRequires:	automake >= 1:1.8
 BuildRequires:	dbus-glib-devel >= 0.74
 BuildRequires:	gettext-tools
-BuildRequires:	glib2-devel >= 1:2.30.0
+BuildRequires:	glib2-devel >= 1:2.50.0
 BuildRequires:	gtk+3-devel
 BuildRequires:	intltool
 BuildRequires:	libnotify-devel >= 0.4.1
@@ -60,9 +60,8 @@ rm -rf $RPM_BUILD_ROOT
 %{__make} install \
 	DESTDIR=$RPM_BUILD_ROOT
 
-%{__rm} -r $RPM_BUILD_ROOT%{_datadir}/locale/ur_PK
-%{__rm} -r $RPM_BUILD_ROOT%{_datadir}/locale/ie
-%{__mv} $RPM_BUILD_ROOT%{_datadir}/locale/{hy_AM,hy}
+%{__rm} -r $RPM_BUILD_ROOT%{_localedir}/{hye,ie,ur_PK}
+%{__mv} $RPM_BUILD_ROOT%{_localedir}/{hy_AM,hy}
 %{__rm} $RPM_BUILD_ROOT%{_libdir}/xfce4/panel/plugins/libxfce4powermanager.la
 
 %find_lang %{name}
@@ -78,7 +77,7 @@ rm -rf $RPM_BUILD_ROOT
 
 %files -f %{name}.lang
 %defattr(644,root,root,755)
-%doc AUTHORS ChangeLog NEWS README TODO
+%doc AUTHORS ChangeLog NEWS TODO
 %{_sysconfdir}/xdg/autostart/xfce4-power-manager.desktop
 %attr(755,root,root) %{_bindir}/xfce4-power-manager
 %attr(755,root,root) %{_bindir}/xfce4-power-manager-settings
